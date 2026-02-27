@@ -1,0 +1,49 @@
+{
+  "id": "memory-wagl",
+  "name": "wagl Memory",
+  "description": "wagl DB-first agent memory: recall, store, and d-score. Takes the OpenClaw memory slot.",
+  "version": "0.1.0",
+  "kind": "memory",
+  "skills": ["./skills"],
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "dbPath": {
+        "type": "string",
+        "description": "Path to wagl libSQL database file"
+      },
+      "autoRecall": {
+        "type": "boolean",
+        "description": "Auto-inject wagl recall results into session context via before_prompt_build hook",
+        "default": true
+      },
+      "autoCapture": {
+        "type": "boolean",
+        "description": "Auto-capture memories at session end via agent_end hook",
+        "default": true
+      },
+      "recallQuery": {
+        "type": "string",
+        "description": "Default recall query run at session start",
+        "default": "who am I, current focus, working rules"
+      },
+      "embedBaseUrl": {
+        "type": "string",
+        "description": "Embedding endpoint base URL"
+      },
+      "embedModel": {
+        "type": "string",
+        "description": "Embedding model name"
+      }
+    }
+  },
+  "uiHints": {
+    "dbPath": { "label": "wagl DB Path", "placeholder": "/home/user/.wagl/memory.db" },
+    "autoRecall": { "label": "Auto-Recall on Session Start" },
+    "autoCapture": { "label": "Auto-Capture on Session End" },
+    "recallQuery": { "label": "Default Recall Query" },
+    "embedBaseUrl": { "label": "Embedding Base URL", "placeholder": "http://ai.biginformatics.net:11434/v1/" },
+    "embedModel": { "label": "Embedding Model", "placeholder": "Qwen3-Embedding-0.6B-f16.gguf" }
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@biginformatics/openclaw-wagl",
+  "version": "0.1.0",
+  "description": "OpenClaw plugin: wagl as the memory backend for BigInformatics agents",
+  "license": "MIT",
+  "private": true,
+  "openclaw": {
+    "extensions": ["./src/index.ts"],
+    "install": {
+      "npmSpec": "@biginformatics/openclaw-wagl",
+      "defaultChoice": "npm"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
