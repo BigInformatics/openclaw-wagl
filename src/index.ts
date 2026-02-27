@@ -12,7 +12,7 @@ const execFileAsync = promisify(execFile);
 
 function resolveConfig(pluginCfg: any) {
   return {
-    dbPath: pluginCfg?.dbPath ?? process.env.WAGL_DB_PATH ?? `${process.env.HOME}/.wagl/memory.db`,
+    dbPath: pluginCfg?.dbPath ?? process.env.WAGL_DB ?? process.env.WAGL_DB_PATH ?? `${process.env.HOME}/.wagl/memory.db`,
     autoRecall: pluginCfg?.autoRecall ?? true,
     autoCapture: pluginCfg?.autoCapture ?? true,
     recallQuery: pluginCfg?.recallQuery ?? "who am I, current focus, working rules",
