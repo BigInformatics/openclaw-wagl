@@ -4,7 +4,9 @@
   "description": "wagl DB-first agent memory: recall, store, and d-score. Takes the OpenClaw memory slot.",
   "version": "0.1.0",
   "kind": "memory",
-  "skills": ["./skills"],
+  "skills": [
+    "./skills"
+  ],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -35,15 +37,38 @@
       "embedModel": {
         "type": "string",
         "description": "Embedding model name"
+      },
+      "sqliteVecPath": {
+        "type": "string",
+        "description": "Path to sqlite-vec extension (.so)"
       }
     }
   },
   "uiHints": {
-    "dbPath": { "label": "wagl DB Path", "placeholder": "/home/user/.wagl/memory.db" },
-    "autoRecall": { "label": "Auto-Recall on Session Start" },
-    "autoCapture": { "label": "Auto-Capture on Session End" },
-    "recallQuery": { "label": "Default Recall Query" },
-    "embedBaseUrl": { "label": "Embedding Base URL", "placeholder": "http://ai.biginformatics.net:11434/v1/" },
-    "embedModel": { "label": "Embedding Model", "placeholder": "Qwen3-Embedding-0.6B-f16.gguf" }
+    "dbPath": {
+      "label": "wagl DB Path",
+      "placeholder": "/home/user/.wagl/memory.db"
+    },
+    "autoRecall": {
+      "label": "Auto-Recall on Session Start"
+    },
+    "autoCapture": {
+      "label": "Auto-Capture on Session End"
+    },
+    "recallQuery": {
+      "label": "Default Recall Query"
+    },
+    "embedBaseUrl": {
+      "label": "Embedding Base URL",
+      "placeholder": "http://ai.biginformatics.net:11434/v1/"
+    },
+    "embedModel": {
+      "label": "Embedding Model",
+      "placeholder": "Qwen3-Embedding-0.6B-f16.gguf"
+    },
+    "sqliteVecPath": {
+      "label": "sqlite-vec Extension Path",
+      "placeholder": "/usr/local/lib/vec0.so"
+    }
   }
 }
