@@ -57,9 +57,10 @@ async function waglRecall(query: string, dbPath: string, env: Record<string,stri
     }
   }
 
-  // Related items
+  // Related items — may be flat or wrapped in { item: ... }
   const related: any[] = data?.related ?? [];
-  for (const item of related) {
+  for (const entry of related) {
+    const item = entry?.item ?? entry;
     const text = item?.text ?? item?.content ?? item?.summary;
     if (text && typeof text === "string" && text.trim()) {
       lines.push(`- ${text.trim()}`);
