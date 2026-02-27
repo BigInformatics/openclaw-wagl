@@ -1,4 +1,14 @@
-import { spawn } from "node:child_process";
+/**
+ * @biginformatics/openclaw-wagl
+ *
+ * OpenClaw memory plugin: wagl DB-first memory backend.
+ * Takes the OpenClaw memory slot: plugins.slots.memory = "memory-wagl"
+ */
+
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 function resolveConfig(cfg: any) {
   const wagl = cfg?.plugins?.entries?.["memory-wagl"]?.config ?? {};
@@ -7,164 +17,30 @@ function resolveConfig(cfg: any) {
     autoRecall: wagl.autoRecall ?? true,
     autoCapture: wagl.autoCapture ?? true,
     recallQuery: wagl.recallQuery ?? "who am I, current focus, working rules",
-    embedBaseUrl: wagl.embedBaseUrl ?? process.env.WAGL_EMBED_BASE_URL,
-    embedModel: wagl.embedModel ?? process.env.WAGL_EMBED_MODEL,
   };
 }
 
-const WAGL_TIMEOUT_MS = 10_000;
-
-function hasWaglNotFound(stderr: string, err: unknown): boolean {
-  const e = err as any;
-  if (e?.code === "ENOENT") {
-    return true;
-  }
-  const text = stderr.toLowerCase();
-  return text.includes("not found") || text.includes("no such file");
-}
-
-function runWagl(args: string[], dbPath?: string) {
-  return new Promise<{ stdout: string; stderr: string; timedOut: boolean; notFound: boolean }>(
-    (resolve) => {
-      const child = spawn("wagl", dbPath ? [...args, "--db", dbPath] : args, {
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-
-      let stdout = "";
-      let stderr = "";
-      let settled = false;
-      let timedOut = false;
-      let notFound = false;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-
-      const finish = (result: { stdout: string; stderr: string; timedOut: boolean }) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        if (timer) {
-          clearTimeout(timer);
-        }
-        resolve({ ...result, notFound });
-      };
-
-      child.stdout?.setEncoding("utf8");
-      child.stderr?.setEncoding("utf8");
-      child.stdout?.on("data", (chunk) => {
-        stdout += String(chunk);
-      });
-      child.stderr?.on("data", (chunk) => {
-        stderr += String(chunk);
-      });
-
-      child.once("error", (err) => {
-        notFound = hasWaglNotFound(stderr, err);
-        finish({ stdout, stderr: stderr || String(err), timedOut: false });
-      });
-
-      child.once("close", (code) => {
-        if (code !== 0) {
-          if (hasWaglNotFound(stderr, null)) {
-            notFound = true;
-          }
-        }
-        finish({ stdout, stderr: code === 0 ? stderr : `${stderr}\n(exit=${code ?? "?"})`, timedOut });
-      });
-
-      timer = setTimeout(() => {
-        timedOut = true;
-        child.kill("SIGKILL");
-      }, WAGL_TIMEOUT_MS);
-    },
-  );
-}
-
-async function waglRecall(query: string, dbPath?: string): Promise<string> {
-  if (!query || !query.trim()) {
-    return "";
-  }
+async function waglExec(args: string[], timeoutMs = 10_000): Promise<string> {
   try {
-    const result = await runWagl(["recall", query], dbPath);
-    if (result.notFound) {
-      console.warn("[openclaw-wagl] wagl binary not found for recall");
-      return "";
-    }
-    if (result.timedOut) {
-      console.warn(`[openclaw-wagl] wagl recall timed out after ${WAGL_TIMEOUT_MS}ms`);
-      return "";
-    }
-    if (result.stderr && result.stderr.includes("(exit=")) {
-      console.warn(`[openclaw-wagl] wagl recall failed: ${result.stderr.trim()}`);
-      return "";
-    }
-    return result.stdout.trim();
-  } catch (err) {
-    console.warn(`[openclaw-wagl] wagl recall error: ${String(err)}`);
-    return "";
+    const { stdout } = await execFileAsync("wagl", args, {
+      timeout: timeoutMs,
+      env: { ...process.env },
+    });
+    return (stdout ?? "").trim();
+  } catch (err: any) {
+    if (err?.code === "ENOENT") throw new Error("wagl binary not found on PATH");
+    if (err?.killed) throw new Error(`wagl timed out after ${timeoutMs}ms`);
+    const msg = err?.stderr?.trim() || err?.message || String(err);
+    throw new Error(`wagl error: ${msg}`);
   }
 }
 
-async function waglStore(content: string, dScore: number, dbPath?: string): Promise<boolean> {
-  if (!content || !content.trim()) {
-    return false;
-  }
-  try {
-    const result = await runWagl(["store", content, "--d-score", String(dScore ?? 0)], dbPath);
-    if (result.notFound) {
-      console.warn("[openclaw-wagl] wagl binary not found for store");
-      return false;
-    }
-    if (result.timedOut) {
-      console.warn(`[openclaw-wagl] wagl store timed out after ${WAGL_TIMEOUT_MS}ms`);
-      return false;
-    }
-    if (result.stderr && result.stderr.includes("(exit=")) {
-      console.warn(`[openclaw-wagl] wagl store failed: ${result.stderr.trim()}`);
-      return false;
-    }
-    return true;
-  } catch (err) {
-    console.warn(`[openclaw-wagl] wagl store error: ${String(err)}`);
-    return false;
-  }
+async function waglRecall(query: string, dbPath: string): Promise<string> {
+  return waglExec(["recall", query, "--db", dbPath]);
 }
 
-function findLastAssistantText(messages: any[]): string {
-  if (!Array.isArray(messages)) {
-    return "";
-  }
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const msg = messages[i];
-    if (!msg || typeof msg !== "object") {
-      continue;
-    }
-    if ((msg as any).role !== "assistant") {
-      continue;
-    }
-    const content = (msg as any).content;
-    if (typeof content === "string" && content.trim()) {
-      return content;
-    }
-    if (Array.isArray(content)) {
-      const textBlocks = content
-        .map((block) => {
-          if (
-            block &&
-            typeof block === "object" &&
-            (block as any).type === "text" &&
-            typeof (block as any).text === "string"
-          ) {
-            return (block as any).text;
-          }
-          return "";
-        })
-        .filter(Boolean);
-      if (textBlocks.length > 0) {
-        return textBlocks.join("\n").trim();
-      }
-    }
-  }
-  return "";
+async function waglStore(content: string, dScore: number, dbPath: string): Promise<string> {
+  return waglExec(["store", content, "--d-score", String(dScore), "--db", dbPath]);
 }
 
 export default function register(api: any) {
@@ -173,18 +49,16 @@ export default function register(api: any) {
   if (cfg.autoRecall) {
     api.registerHook?.(
       "before_prompt_build",
-      async (event: any, ctx: any) => {
-        const query = cfg.recallQuery || event?.prompt || "";
-        const results = await waglRecall(query, cfg.dbPath);
-        if (!results) {
-          return;
+      async (ctx: any) => {
+        try {
+          const results = await waglRecall(cfg.recallQuery, cfg.dbPath);
+          if (results) {
+            ctx.prependContext?.(`## Memory (wagl)\n${results}`);
+            api.logger?.info?.(`[openclaw-wagl] recall injected (${results.length} chars)`);
+          }
+        } catch (err) {
+          api.logger?.warn?.(`[openclaw-wagl] recall skipped: ${String(err)}`);
         }
-        const memoryContext = `## Memory (wagl)\n${results}`;
-        if (ctx && typeof ctx.prependContext === "function") {
-          ctx.prependContext(memoryContext);
-          return;
-        }
-        return { prependContext: memoryContext };
       },
       { name: "memory-wagl.recall", description: "Inject wagl recall into session context" }
     );
@@ -193,87 +67,68 @@ export default function register(api: any) {
   if (cfg.autoCapture) {
     api.registerHook?.(
       "agent_end",
-      async (event: any, _ctx: any) => {
-        const content = findLastAssistantText(event?.messages || []);
-        if (!content) {
-          return;
+      async (ctx: any) => {
+        try {
+          const messages: any[] = ctx?.messages ?? [];
+          const last = [...messages]
+            .reverse()
+            .find((m) => m?.role === "assistant" && typeof m?.content === "string" && m.content.trim().length > 20);
+          if (last) {
+            const snippet = last.content.slice(0, 500).trim();
+            await waglStore(`Session note: ${snippet}`, 0, cfg.dbPath);
+            api.logger?.info?.("[openclaw-wagl] session memory captured");
+          }
+        } catch (err) {
+          api.logger?.warn?.(`[openclaw-wagl] capture skipped: ${String(err)}`);
         }
-        await waglStore(content, 0, cfg.dbPath);
       },
       { name: "memory-wagl.capture", description: "Auto-capture memories at session end" }
     );
   }
 
-  api.registerTool?.(
-    {
-      name: "wagl_recall",
-      label: "Wagl Recall",
-      description: "Recall memory snippets from wagl",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "Recall query" },
-        },
-        required: ["query"],
-      },
-      async execute(_toolCallId: string, params: any) {
-        const query = typeof params?.query === "string" ? params.query : "";
-        if (!query.trim()) {
-          return {
-            content: [{ type: "text", text: "Missing query." }],
-            details: { ok: false, error: "missing_query" },
-          };
-        }
-        const results = await waglRecall(query, cfg.dbPath);
-        return {
-          content: [{ type: "text", text: results || "No wagl results." }],
-          details: { ok: true, hasResults: Boolean(results) },
-        };
+  api.registerTool?.({
+    name: "wagl_recall",
+    label: "wagl Recall",
+    description: "Recall memories matching a query from the wagl DB.",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["query"],
+      properties: {
+        query: { type: "string", description: "What to recall" },
       },
     },
-    { name: "wagl_recall" },
-  );
+    async execute(_toolCallId: string, params: any) {
+      const query = String(params?.query ?? "").trim();
+      if (!query) throw new Error("query is required");
+      const results = await waglRecall(query, cfg.dbPath);
+      return { content: [{ type: "text" as const, text: results || "(no memories found)" }] };
+    },
+  });
 
-  api.registerTool?.(
-    {
-      name: "wagl_store",
-      label: "Wagl Store",
-      description: "Store a memory in wagl",
-      parameters: {
-        type: "object",
-        properties: {
-          content: { type: "string", description: "Content to store" },
-          d_score: { type: "number", description: "Decay score (default 0)" },
-        },
-        required: ["content"],
-      },
-      async execute(_toolCallId: string, params: any) {
-        const content = typeof params?.content === "string" ? params.content : "";
-        const dScore = typeof params?.d_score === "number" ? params.d_score : 0;
-        if (!content.trim()) {
-          return {
-            content: [{ type: "text", text: "Missing content." }],
-            details: { ok: false, error: "missing_content" },
-          };
-        }
-        const ok = await waglStore(content, dScore, cfg.dbPath);
-        return {
-          content: [
-            {
-              type: "text",
-              text: ok ? `Stored in wagl (d_score=${dScore}).` : "Failed to store in wagl.",
-            },
-          ],
-          details: { ok, dScore },
-        };
+  api.registerTool?.({
+    name: "wagl_store",
+    label: "wagl Store",
+    description: "Store a memory in the wagl DB with an optional d-score (-10 to +10).",
+    parameters: {
+      type: "object",
+      additionalProperties: false,
+      required: ["content"],
+      properties: {
+        content: { type: "string", description: "Memory content to store" },
+        d_score: { type: "number", description: "Sentiment score -10 to +10 (default 0)" },
       },
     },
-    { name: "wagl_store" },
-  );
+    async execute(_toolCallId: string, params: any) {
+      const content = String(params?.content ?? "").trim();
+      if (!content) throw new Error("content is required");
+      const dScore = typeof params?.d_score === "number" ? params.d_score : 0;
+      await waglStore(content, dScore, cfg.dbPath);
+      return { content: [{ type: "text" as const, text: `Stored memory (d_score=${dScore})` }] };
+    },
+  });
 
   if (api.logger?.info) {
-    api.logger.info(
-      `[openclaw-wagl] registered (db=${cfg.dbPath}, autoRecall=${cfg.autoRecall}, autoCapture=${cfg.autoCapture})`
-    );
+    api.logger.info(`[openclaw-wagl] registered (db=${cfg.dbPath}, autoRecall=${cfg.autoRecall}, autoCapture=${cfg.autoCapture})`);
   }
 }
