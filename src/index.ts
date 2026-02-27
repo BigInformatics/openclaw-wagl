@@ -40,7 +40,7 @@ async function waglRecall(query: string, dbPath: string): Promise<string> {
 }
 
 async function waglStore(content: string, dScore: number, dbPath: string): Promise<string> {
-  return waglExec(["store", content, "--d-score", String(dScore), "--db", dbPath]);
+  return waglExec(["put", "--text", content, "--d-score", String(dScore), "--db", dbPath]);
 }
 
 export default function register(api: any) {
