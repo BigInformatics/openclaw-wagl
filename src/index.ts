@@ -70,8 +70,9 @@ async function waglRecall(query: string, dbPath: string, env: Record<string,stri
   return lines.length > 0 ? lines.join("\n") : null;
 }
 
-async function waglPut(content: string, dScore: number, dbPath: string, env: Record<string,string> = {}): Promise<void> {
-  await waglExec(["put", "--text", content, "--d-score", String(dScore), "--db", dbPath], 10_000, env);
+async function waglPut(content: string, dScore: number, dbPath: string, env: Record<string,string> = {}): Promise<string> {
+  const out = await waglExec(["put", "--text", content, "--d-score", String(dScore), "--db", dbPath], 10_000, env);
+  try { return JSON.parse(out)?.id ?? ""; } catch { return ""; }
 }
 
 
@@ -187,8 +188,9 @@ export default function register(api: any) {
       const content = String(params?.content ?? "").trim();
       if (!content) throw new Error("content is required");
       const dScore = typeof params?.d_score === "number" ? params.d_score : 0;
-      await waglPut(content, dScore, cfg.dbPath, waglEnv);
-      return { content: [{ type: "text" as const, text: `Stored memory (d_score=${dScore})` }] };
+      const id = await waglPut(content, dScore, cfg.dbPath, waglEnv);
+      const idStr = id ? ` (id: ${id})` : "";
+      return { content: [{ type: "text" as const, text: `Stored memory (d_score=${dScore})${idStr}` }] };
     },
   });
 
