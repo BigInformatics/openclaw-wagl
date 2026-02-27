@@ -93,8 +93,8 @@ function buildWaglEnv(cfg: any): Record<string, string> {
   const wagl = cfg?.plugins?.entries?.["memory-wagl"]?.config ?? {};
   const env: Record<string, string> = {};
   const vec = wagl.sqliteVecPath ?? process.env.SQLITE_VEC_PATH;
-  const embUrl = wagl.embeddingsBaseUrl ?? process.env.WAGL_EMBEDDINGS_BASE_URL;
-  const embModel = wagl.embeddingsModel ?? process.env.WAGL_EMBEDDINGS_MODEL;
+  const embUrl = wagl.embedBaseUrl ?? process.env.WAGL_EMBEDDINGS_BASE_URL;
+  const embModel = wagl.embedModel ?? process.env.WAGL_EMBEDDINGS_MODEL;
   if (vec) env.SQLITE_VEC_PATH = vec;
   if (embUrl) env.WAGL_EMBEDDINGS_BASE_URL = embUrl;
   if (embModel) env.WAGL_EMBEDDINGS_MODEL = embModel;
