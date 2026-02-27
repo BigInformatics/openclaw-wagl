@@ -35,8 +35,39 @@ async function waglExec(args: string[], timeoutMs = 10_000): Promise<string> {
   }
 }
 
-async function waglRecall(query: string, dbPath: string): Promise<string> {
-  return waglExec(["recall", query, "--db", dbPath]);
+/** Run wagl recall and return formatted text, or null if nothing meaningful. */
+async function waglRecall(query: string, dbPath: string): Promise<string | null> {
+  const raw = await waglExec(["recall", query, "--db", dbPath]);
+  let data: any;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    // If output isn't JSON, return as-is if non-empty
+    return raw.length > 10 ? raw : null;
+  }
+
+  const lines: string[] = [];
+
+  // Canonical objects
+  const canonical = data?.canonical ?? {};
+  for (const [key, val] of Object.entries(canonical)) {
+    if (val && typeof val === "object") {
+      lines.push(`**${key}:** ${JSON.stringify(val)}`);
+    } else if (typeof val === "string" && val.trim()) {
+      lines.push(`**${key}:** ${val.trim()}`);
+    }
+  }
+
+  // Related items
+  const related: any[] = data?.related ?? [];
+  for (const item of related) {
+    const text = item?.text ?? item?.content ?? item?.summary;
+    if (text && typeof text === "string" && text.trim()) {
+      lines.push(`- ${text.trim()}`);
+    }
+  }
+
+  return lines.length > 0 ? lines.join("\n") : null;
 }
 
 async function waglPut(content: string, dScore: number, dbPath: string): Promise<void> {
@@ -51,11 +82,12 @@ export default function register(api: any) {
     api.on("before_agent_start", async (event: any) => {
       if (!event.prompt || event.prompt.length < 5) return;
       try {
-        const results = await waglRecall(cfg.recallQuery, cfg.dbPath);
-        if (results) {
-          api.logger?.info?.(`[openclaw-wagl] recall injected (${results.length} chars)`);
-          return { prependContext: `## Memory (wagl)\n${results}` };
+        const formatted = await waglRecall(cfg.recallQuery, cfg.dbPath);
+        if (formatted) {
+          api.logger?.info?.(`[openclaw-wagl] recall injected (${formatted.length} chars)`);
+          return { prependContext: `## Memory (wagl)\n${formatted}` };
         }
+        api.logger?.info?.("[openclaw-wagl] recall: nothing to inject");
       } catch (err) {
         api.logger?.warn?.(`[openclaw-wagl] recall skipped: ${String(err)}`);
       }
@@ -98,8 +130,8 @@ export default function register(api: any) {
     async execute(_toolCallId: string, params: any) {
       const query = String(params?.query ?? "").trim();
       if (!query) throw new Error("query is required");
-      const results = await waglRecall(query, cfg.dbPath);
-      return { content: [{ type: "text" as const, text: results || "(no memories found)" }] };
+      const formatted = await waglRecall(query, cfg.dbPath);
+      return { content: [{ type: "text" as const, text: formatted ?? "(no memories found)" }] };
     },
   });
 
