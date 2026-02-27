@@ -39,53 +39,50 @@ async function waglRecall(query: string, dbPath: string): Promise<string> {
   return waglExec(["recall", query, "--db", dbPath]);
 }
 
-async function waglStore(content: string, dScore: number, dbPath: string): Promise<string> {
-  return waglExec(["put", "--text", content, "--d-score", String(dScore), "--db", dbPath]);
+async function waglPut(content: string, dScore: number, dbPath: string): Promise<void> {
+  await waglExec(["put", "--text", content, "--d-score", String(dScore), "--db", dbPath]);
 }
 
 export default function register(api: any) {
   const cfg = resolveConfig(api.config);
 
+  // ── before_agent_start: auto-inject wagl recall into session context
   if (cfg.autoRecall) {
-    api.registerHook?.(
-      "before_prompt_build",
-      async (ctx: any) => {
-        try {
-          const results = await waglRecall(cfg.recallQuery, cfg.dbPath);
-          if (results) {
-            ctx.prependContext?.(`## Memory (wagl)\n${results}`);
-            api.logger?.info?.(`[openclaw-wagl] recall injected (${results.length} chars)`);
-          }
-        } catch (err) {
-          api.logger?.warn?.(`[openclaw-wagl] recall skipped: ${String(err)}`);
+    api.on("before_agent_start", async (event: any) => {
+      if (!event.prompt || event.prompt.length < 5) return;
+      try {
+        const results = await waglRecall(cfg.recallQuery, cfg.dbPath);
+        if (results) {
+          api.logger?.info?.(`[openclaw-wagl] recall injected (${results.length} chars)`);
+          return { prependContext: `## Memory (wagl)\n${results}` };
         }
-      },
-      { name: "memory-wagl.recall", description: "Inject wagl recall into session context" }
-    );
+      } catch (err) {
+        api.logger?.warn?.(`[openclaw-wagl] recall skipped: ${String(err)}`);
+      }
+    });
   }
 
+  // ── agent_end: capture last assistant message as a memory
   if (cfg.autoCapture) {
-    api.registerHook?.(
-      "agent_end",
-      async (ctx: any) => {
-        try {
-          const messages: any[] = ctx?.messages ?? [];
-          const last = [...messages]
-            .reverse()
-            .find((m) => m?.role === "assistant" && typeof m?.content === "string" && m.content.trim().length > 20);
-          if (last) {
-            const snippet = last.content.slice(0, 500).trim();
-            await waglStore(`Session note: ${snippet}`, 0, cfg.dbPath);
-            api.logger?.info?.("[openclaw-wagl] session memory captured");
-          }
-        } catch (err) {
-          api.logger?.warn?.(`[openclaw-wagl] capture skipped: ${String(err)}`);
+    api.on("agent_end", async (event: any) => {
+      if (!event.success || !event.messages?.length) return;
+      try {
+        const messages: any[] = event.messages;
+        const last = [...messages]
+          .reverse()
+          .find((m) => m?.role === "assistant" && typeof m?.content === "string" && m.content.trim().length > 20);
+        if (last) {
+          const snippet = last.content.slice(0, 500).trim();
+          await waglPut(`Session note: ${snippet}`, 0, cfg.dbPath);
+          api.logger?.info?.("[openclaw-wagl] session memory captured");
         }
-      },
-      { name: "memory-wagl.capture", description: "Auto-capture memories at session end" }
-    );
+      } catch (err) {
+        api.logger?.warn?.(`[openclaw-wagl] capture skipped: ${String(err)}`);
+      }
+    });
   }
 
+  // ── Agent tools
   api.registerTool?.({
     name: "wagl_recall",
     label: "wagl Recall",
@@ -123,7 +120,7 @@ export default function register(api: any) {
       const content = String(params?.content ?? "").trim();
       if (!content) throw new Error("content is required");
       const dScore = typeof params?.d_score === "number" ? params.d_score : 0;
-      await waglStore(content, dScore, cfg.dbPath);
+      await waglPut(content, dScore, cfg.dbPath);
       return { content: [{ type: "text" as const, text: `Stored memory (d_score=${dScore})` }] };
     },
   });
