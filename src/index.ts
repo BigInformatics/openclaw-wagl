@@ -84,8 +84,7 @@ function extractContentText(content: any): string {
       const t = (block as any).text;
       if (typeof t === "string" && t.trim()) parts.push(t.trim());
     }
-    return parts.join("
-");
+    return parts.join("\n");
   }
   return "";
 }
