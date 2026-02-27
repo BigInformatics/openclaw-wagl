@@ -10,13 +10,12 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
-function resolveConfig(cfg: any) {
-  const wagl = cfg?.plugins?.entries?.["memory-wagl"]?.config ?? {};
+function resolveConfig(pluginCfg: any) {
   return {
-    dbPath: wagl.dbPath ?? process.env.WAGL_DB_PATH ?? `${process.env.HOME}/.wagl/memory.db`,
-    autoRecall: wagl.autoRecall ?? true,
-    autoCapture: wagl.autoCapture ?? true,
-    recallQuery: wagl.recallQuery ?? "who am I, current focus, working rules",
+    dbPath: pluginCfg?.dbPath ?? process.env.WAGL_DB_PATH ?? `${process.env.HOME}/.wagl/memory.db`,
+    autoRecall: pluginCfg?.autoRecall ?? true,
+    autoCapture: pluginCfg?.autoCapture ?? true,
+    recallQuery: pluginCfg?.recallQuery ?? "who am I, current focus, working rules",
   };
 }
 
@@ -89,12 +88,11 @@ function extractContentText(content: any): string {
   return "";
 }
 
-function buildWaglEnv(cfg: any): Record<string, string> {
-  const wagl = cfg?.plugins?.entries?.["memory-wagl"]?.config ?? {};
+function buildWaglEnv(pluginCfg: any): Record<string, string> {
   const env: Record<string, string> = {};
-  const vec = wagl.sqliteVecPath ?? process.env.SQLITE_VEC_PATH;
-  const embUrl = wagl.embedBaseUrl ?? process.env.WAGL_EMBEDDINGS_BASE_URL;
-  const embModel = wagl.embedModel ?? process.env.WAGL_EMBEDDINGS_MODEL;
+  const vec = pluginCfg?.sqliteVecPath ?? process.env.SQLITE_VEC_PATH;
+  const embUrl = pluginCfg?.embedBaseUrl ?? process.env.WAGL_EMBEDDINGS_BASE_URL;
+  const embModel = pluginCfg?.embedModel ?? process.env.WAGL_EMBEDDINGS_MODEL;
   if (vec) env.SQLITE_VEC_PATH = vec;
   if (embUrl) env.WAGL_EMBEDDINGS_BASE_URL = embUrl;
   if (embModel) env.WAGL_EMBEDDINGS_MODEL = embModel;
@@ -102,8 +100,8 @@ function buildWaglEnv(cfg: any): Record<string, string> {
 }
 
 export default function register(api: any) {
-  const cfg = resolveConfig(api.config);
-  const waglEnv = buildWaglEnv(api.config);
+  const cfg = resolveConfig(api.pluginConfig);
+  const waglEnv = buildWaglEnv(api.pluginConfig);
 
   // ── before_agent_start: auto-inject wagl recall into session context
   if (cfg.autoRecall) {
