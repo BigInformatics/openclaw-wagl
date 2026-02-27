@@ -20,11 +20,11 @@ function resolveConfig(cfg: any) {
   };
 }
 
-async function waglExec(args: string[], timeoutMs = 10_000): Promise<string> {
+async function waglExec(args: string[], timeoutMs = 10_000, extraEnv: Record<string,string> = {}): Promise<string> {
   try {
     const { stdout } = await execFileAsync("wagl", args, {
       timeout: timeoutMs,
-      env: { ...process.env },
+      env: { ...process.env, ...extraEnv },
     });
     return (stdout ?? "").trim();
   } catch (err: any) {
@@ -36,8 +36,8 @@ async function waglExec(args: string[], timeoutMs = 10_000): Promise<string> {
 }
 
 /** Run wagl recall and return formatted text, or null if nothing meaningful. */
-async function waglRecall(query: string, dbPath: string): Promise<string | null> {
-  const raw = await waglExec(["recall", query, "--db", dbPath]);
+async function waglRecall(query: string, dbPath: string, env: Record<string,string> = {}): Promise<string | null> {
+  const raw = await waglExec(["recall", query, "--db", dbPath], 10_000, env);
   let data: any;
   try {
     data = JSON.parse(raw);
@@ -70,8 +70,8 @@ async function waglRecall(query: string, dbPath: string): Promise<string | null>
   return lines.length > 0 ? lines.join("\n") : null;
 }
 
-async function waglPut(content: string, dScore: number, dbPath: string): Promise<void> {
-  await waglExec(["put", "--text", content, "--d-score", String(dScore), "--db", dbPath]);
+async function waglPut(content: string, dScore: number, dbPath: string, env: Record<string,string> = {}): Promise<void> {
+  await waglExec(["put", "--text", content, "--d-score", String(dScore), "--db", dbPath], 10_000, env);
 }
 
 
@@ -89,15 +89,28 @@ function extractContentText(content: any): string {
   return "";
 }
 
+function buildWaglEnv(cfg: any): Record<string, string> {
+  const wagl = cfg?.plugins?.entries?.["memory-wagl"]?.config ?? {};
+  const env: Record<string, string> = {};
+  const vec = wagl.sqliteVecPath ?? process.env.SQLITE_VEC_PATH;
+  const embUrl = wagl.embeddingsBaseUrl ?? process.env.WAGL_EMBEDDINGS_BASE_URL;
+  const embModel = wagl.embeddingsModel ?? process.env.WAGL_EMBEDDINGS_MODEL;
+  if (vec) env.SQLITE_VEC_PATH = vec;
+  if (embUrl) env.WAGL_EMBEDDINGS_BASE_URL = embUrl;
+  if (embModel) env.WAGL_EMBEDDINGS_MODEL = embModel;
+  return env;
+}
+
 export default function register(api: any) {
   const cfg = resolveConfig(api.config);
+  const waglEnv = buildWaglEnv(api.config);
 
   // ── before_agent_start: auto-inject wagl recall into session context
   if (cfg.autoRecall) {
     api.on("before_agent_start", async (event: any) => {
       if (!event.prompt || event.prompt.length < 5) return;
       try {
-        const formatted = await waglRecall(cfg.recallQuery, cfg.dbPath);
+        const formatted = await waglRecall(cfg.recallQuery, cfg.dbPath, waglEnv);
         if (formatted) {
           api.logger?.info?.(`[openclaw-wagl] recall injected (${formatted.length} chars)`);
           return { prependContext: `## Memory (wagl)\n${formatted}` };
@@ -129,7 +142,7 @@ export default function register(api: any) {
         }
 
         const snippet = extractContentText(last.content).slice(0, 500).trim();
-        await waglPut(`Session note: ${snippet}`, 0, cfg.dbPath);
+        await waglPut(`Session note: ${snippet}`, 0, cfg.dbPath, waglEnv);
         api.logger?.info?.("[openclaw-wagl] session memory captured");
       } catch (err) {
         api.logger?.warn?.(`[openclaw-wagl] capture skipped: ${String(err)}`);
@@ -153,7 +166,7 @@ export default function register(api: any) {
     async execute(_toolCallId: string, params: any) {
       const query = String(params?.query ?? "").trim();
       if (!query) throw new Error("query is required");
-      const formatted = await waglRecall(query, cfg.dbPath);
+      const formatted = await waglRecall(query, cfg.dbPath, waglEnv);
       return { content: [{ type: "text" as const, text: formatted ?? "(no memories found)" }] };
     },
   });
@@ -175,7 +188,7 @@ export default function register(api: any) {
       const content = String(params?.content ?? "").trim();
       if (!content) throw new Error("content is required");
       const dScore = typeof params?.d_score === "number" ? params.d_score : 0;
-      await waglPut(content, dScore, cfg.dbPath);
+      await waglPut(content, dScore, cfg.dbPath, waglEnv);
       return { content: [{ type: "text" as const, text: `Stored memory (d_score=${dScore})` }] };
     },
   });
