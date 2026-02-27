@@ -74,6 +74,22 @@ async function waglPut(content: string, dScore: number, dbPath: string): Promise
   await waglExec(["put", "--text", content, "--d-score", String(dScore), "--db", dbPath]);
 }
 
+
+function extractContentText(content: any): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const parts: string[] = [];
+    for (const block of content) {
+      if (!block || typeof block !== "object") continue;
+      const t = (block as any).text;
+      if (typeof t === "string" && t.trim()) parts.push(t.trim());
+    }
+    return parts.join("
+");
+  }
+  return "";
+}
+
 export default function register(api: any) {
   const cfg = resolveConfig(api.config);
 
@@ -97,17 +113,25 @@ export default function register(api: any) {
   // ── agent_end: capture last assistant message as a memory
   if (cfg.autoCapture) {
     api.on("agent_end", async (event: any) => {
-      if (!event.success || !event.messages?.length) return;
       try {
-        const messages: any[] = event.messages;
-        const last = [...messages]
-          .reverse()
-          .find((m) => m?.role === "assistant" && typeof m?.content === "string" && m.content.trim().length > 20);
-        if (last) {
-          const snippet = last.content.slice(0, 500).trim();
-          await waglPut(`Session note: ${snippet}`, 0, cfg.dbPath);
-          api.logger?.info?.("[openclaw-wagl] session memory captured");
+        const messages: any[] = event?.messages ?? [];
+        api.logger?.info?.(`[openclaw-wagl] agent_end received (success=${Boolean(event?.success)}, messages=${messages.length})`);
+        if (!event?.success || messages.length === 0) return;
+
+        const last = [...messages].reverse().find((m) => {
+          if (m?.role !== "assistant") return false;
+          const txt = extractContentText(m?.content).trim();
+          return txt.length > 20;
+        });
+
+        if (!last) {
+          api.logger?.info?.("[openclaw-wagl] capture: no assistant content to store");
+          return;
         }
+
+        const snippet = extractContentText(last.content).slice(0, 500).trim();
+        await waglPut(`Session note: ${snippet}`, 0, cfg.dbPath);
+        api.logger?.info?.("[openclaw-wagl] session memory captured");
       } catch (err) {
         api.logger?.warn?.(`[openclaw-wagl] capture skipped: ${String(err)}`);
       }
