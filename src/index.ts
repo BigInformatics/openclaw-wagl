@@ -6,6 +6,7 @@
  */
 
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -70,8 +71,18 @@ async function waglRecall(query: string, dbPath: string, env: Record<string,stri
   return lines.length > 0 ? lines.join("\n") : null;
 }
 
-async function waglPut(content: string, dScore: number, dbPath: string, env: Record<string,string> = {}): Promise<string> {
-  const out = await waglExec(["put", "--text", content, "--d-score", String(dScore), "--db", dbPath], 10_000, env);
+async function waglPut(
+  content: string,
+  dScore: number,
+  dbPath: string,
+  env: Record<string, string> = {},
+  dedupeKey?: string,
+  memType?: string,
+): Promise<string> {
+  const args = ["put", "--text", content, "--d-score", String(dScore), "--db", dbPath];
+  if (dedupeKey) args.push("--dedupe-key", dedupeKey);
+  if (memType) args.push("--type", memType);
+  const out = await waglExec(args, 10_000, env);
   try { return JSON.parse(out)?.id ?? ""; } catch { return ""; }
 }
 
@@ -142,7 +153,9 @@ export default function register(api: any) {
         }
 
         const snippet = extractContentText(last.content).slice(0, 500).trim();
-        await waglPut(`Session note: ${snippet}`, 0, cfg.dbPath, waglEnv);
+        if (!snippet) return;
+        const dedupeKey = createHash("sha256").update(snippet).digest("hex").slice(0, 32);
+        await waglPut(`Session note: ${snippet}`, 0, cfg.dbPath, waglEnv, dedupeKey, "transcript");
         api.logger?.info?.("[openclaw-wagl] session memory captured");
       } catch (err) {
         api.logger?.warn?.(`[openclaw-wagl] capture skipped: ${String(err)}`);
