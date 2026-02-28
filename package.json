@@ -1,6 +1,6 @@
 {
   "name": "@biginformatics/openclaw-wagl",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "wagl memory backend for OpenClaw agents. Takes the OpenClaw memory slot and auto-injects wagl recall into every session start, captures memories at session end, and exposes recall/store/search as native agent tools — no manual memory management required.",
   "license": "Apache-2.0",
   "repository": {
