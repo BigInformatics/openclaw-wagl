@@ -1,8 +1,8 @@
 {
-  "id": "memory-wagl",
+  "id": "openclaw-wagl",
   "name": "wagl Memory",
   "description": "wagl DB-first agent memory: recall, store, and d-score. Takes the OpenClaw memory slot.",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "kind": "memory",
   "skills": [
     "./skills"
@@ -60,7 +60,7 @@
     },
     "embedBaseUrl": {
       "label": "Embedding Base URL",
-      "placeholder": "http://ai.biginformatics.net:11434/v1/"
+      "placeholder": "http://localhost:11434/v1/"
     },
     "embedModel": {
       "label": "Embedding Model",
