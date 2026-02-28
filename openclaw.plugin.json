@@ -60,7 +60,7 @@
     },
     "embedBaseUrl": {
       "label": "Embedding Base URL",
-      "placeholder": "http://ai.biginformatics.net:11434/v1/"
+      "placeholder": "http://localhost:11434/v1/"
     },
     "embedModel": {
       "label": "Embedding Model",

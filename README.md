@@ -122,7 +122,7 @@ All config is optional — defaults work for a basic setup.
 
 ## Known limitations
 
-- `vec0.so` is not yet bundled with the wagl binary — see [wagl#51](https://dev.biginformatics.net/wagl/~issues/51) for the tracking issue
+- `vec0.so` is not yet bundled with the wagl binary — see [wagl#17](https://github.com/BigInformatics/wagl/issues/17) for the tracking issue
 - Without semantic embeddings, recall uses text-only matching which has lower precision
 
 ## License
