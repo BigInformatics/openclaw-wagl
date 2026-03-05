@@ -78,10 +78,14 @@ async function waglPut(
   env: Record<string, string> = {},
   dedupeKey?: string,
   memType?: string,
+  tags?: string[],
 ): Promise<string> {
   const args = ["put", "--text", content, "--d-score", String(dScore), "--db", dbPath];
   if (dedupeKey) args.push("--dedupe-key", dedupeKey);
   if (memType) args.push("--type", memType);
+  if (tags) {
+    for (const tag of tags) args.push("--tag", tag);
+  }
   const out = await waglExec(args, 10_000, env);
   try { return JSON.parse(out)?.id ?? ""; } catch { return ""; }
 }
@@ -116,6 +120,10 @@ export default function register(api: any) {
   const cfg = resolveConfig(api.pluginConfig);
   const waglEnv = buildWaglEnv(api.pluginConfig);
 
+  // Track the last model used per session (populated by llm_output hook).
+  // Used to tag captured memories with the model that produced them.
+  const sessionModelMap = new Map<string, string>();
+
   // ── before_agent_start: auto-inject wagl recall into session context
   if (cfg.autoRecall) {
     api.on("before_agent_start", async (event: any) => {
@@ -133,9 +141,20 @@ export default function register(api: any) {
     });
   }
 
+  // ── llm_output: track which model produced each session's response
+  api.on("llm_output", (event: any) => {
+    const sessionId = event?.sessionId;
+    const model = event?.model;
+    const provider = event?.provider;
+    if (sessionId && model) {
+      const label = provider ? `${provider}/${model}` : model;
+      sessionModelMap.set(sessionId, label);
+    }
+  });
+
   // ── agent_end: capture last assistant message as a memory
   if (cfg.autoCapture) {
-    api.on("agent_end", async (event: any) => {
+    api.on("agent_end", async (event: any, ctx: any) => {
       try {
         const messages: any[] = event?.messages ?? [];
         api.logger?.info?.(`[openclaw-wagl] agent_end received (success=${Boolean(event?.success)}, messages=${messages.length})`);
@@ -155,8 +174,14 @@ export default function register(api: any) {
         const snippet = extractContentText(last.content).slice(0, 500).trim();
         if (!snippet) return;
         const dedupeKey = createHash("sha256").update(snippet).digest("hex").slice(0, 32);
-        await waglPut(`Session note: ${snippet}`, 0, cfg.dbPath, waglEnv, dedupeKey, "transcript");
-        api.logger?.info?.("[openclaw-wagl] session memory captured");
+
+        // Tag with the model that produced this response (if known)
+        const sessionId = ctx?.sessionId ?? event?.sessionId;
+        const model = sessionId ? sessionModelMap.get(sessionId) : undefined;
+        const tags = model ? [`model:${model}`] : undefined;
+
+        await waglPut(`Session note: ${snippet}`, 0, cfg.dbPath, waglEnv, dedupeKey, "transcript", tags);
+        api.logger?.info?.(`[openclaw-wagl] session memory captured${model ? ` (model=${model})` : ""}`);
       } catch (err) {
         api.logger?.warn?.(`[openclaw-wagl] capture skipped: ${String(err)}`);
       }
