@@ -120,10 +120,6 @@ export default function register(api: any) {
   const cfg = resolveConfig(api.pluginConfig);
   const waglEnv = buildWaglEnv(api.pluginConfig);
 
-  // Track the last model used per session (populated by llm_output hook).
-  // Used to tag captured memories with the model that produced them.
-  const sessionModelMap = new Map<string, string>();
-
   // ── before_agent_start: auto-inject wagl recall into session context
   if (cfg.autoRecall) {
     api.on("before_agent_start", async (event: any) => {
@@ -141,19 +137,29 @@ export default function register(api: any) {
     });
   }
 
-  // ── llm_output: track which model produced each session's response
-  api.on("llm_output", (event: any) => {
-    const sessionId = event?.sessionId;
-    const model = event?.model;
-    const provider = event?.provider;
-    if (sessionId && model) {
-      const label = provider ? `${provider}/${model}` : model;
-      sessionModelMap.set(sessionId, label);
-    }
-  });
-
   // ── agent_end: capture last assistant message as a memory
   if (cfg.autoCapture) {
+    // Track the last model used per session so we can tag captured memories.
+    // Scoped inside autoCapture since it's only consumed here.
+    const sessionModelMap = new Map<string, string>();
+
+    api.on("llm_output", (event: any) => {
+      const sessionId = event?.sessionId;
+      const model = event?.model;
+      const provider = event?.provider;
+      if (sessionId && model) {
+        const label = provider ? `${provider}/${model}` : model;
+        sessionModelMap.set(sessionId, label);
+      }
+    });
+
+    // Clean up map entries when sessions end to prevent unbounded growth
+    // and avoid stale tags if sessionIds are ever reused.
+    api.on("session_end", (event: any, ctx: any) => {
+      const sessionId = ctx?.sessionId ?? event?.sessionId;
+      if (sessionId) sessionModelMap.delete(sessionId);
+    });
+
     api.on("agent_end", async (event: any, ctx: any) => {
       try {
         const messages: any[] = event?.messages ?? [];
