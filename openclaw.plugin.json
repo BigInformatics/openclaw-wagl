@@ -2,7 +2,7 @@
   "id": "openclaw-wagl",
   "name": "wagl Memory",
   "description": "wagl DB-first agent memory: recall, store, and d-score. Takes the OpenClaw memory slot.",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "kind": "memory",
   "skills": [
     "./skills"

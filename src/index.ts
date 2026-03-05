@@ -6,6 +6,7 @@
  */
 
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -70,8 +71,22 @@ async function waglRecall(query: string, dbPath: string, env: Record<string,stri
   return lines.length > 0 ? lines.join("\n") : null;
 }
 
-async function waglPut(content: string, dScore: number, dbPath: string, env: Record<string,string> = {}): Promise<string> {
-  const out = await waglExec(["put", "--text", content, "--d-score", String(dScore), "--db", dbPath], 10_000, env);
+async function waglPut(
+  content: string,
+  dScore: number,
+  dbPath: string,
+  env: Record<string, string> = {},
+  dedupeKey?: string,
+  memType?: string,
+  tags?: string[],
+): Promise<string> {
+  const args = ["put", "--text", content, "--d-score", String(dScore), "--db", dbPath];
+  if (dedupeKey) args.push("--dedupe-key", dedupeKey);
+  if (memType) args.push("--type", memType);
+  if (tags) {
+    for (const tag of tags) args.push("--tag", tag);
+  }
+  const out = await waglExec(args, 10_000, env);
   try { return JSON.parse(out)?.id ?? ""; } catch { return ""; }
 }
 
@@ -124,7 +139,28 @@ export default function register(api: any) {
 
   // ── agent_end: capture last assistant message as a memory
   if (cfg.autoCapture) {
-    api.on("agent_end", async (event: any) => {
+    // Track the last model used per session so we can tag captured memories.
+    // Scoped inside autoCapture since it's only consumed here.
+    const sessionModelMap = new Map<string, string>();
+
+    api.on("llm_output", (event: any) => {
+      const sessionId = event?.sessionId;
+      const model = event?.model;
+      const provider = event?.provider;
+      if (sessionId && model) {
+        const label = provider ? `${provider}/${model}` : model;
+        sessionModelMap.set(sessionId, label);
+      }
+    });
+
+    // Clean up map entries when sessions end to prevent unbounded growth
+    // and avoid stale tags if sessionIds are ever reused.
+    api.on("session_end", (event: any, ctx: any) => {
+      const sessionId = ctx?.sessionId ?? event?.sessionId;
+      if (sessionId) sessionModelMap.delete(sessionId);
+    });
+
+    api.on("agent_end", async (event: any, ctx: any) => {
       try {
         const messages: any[] = event?.messages ?? [];
         api.logger?.info?.(`[openclaw-wagl] agent_end received (success=${Boolean(event?.success)}, messages=${messages.length})`);
@@ -142,8 +178,16 @@ export default function register(api: any) {
         }
 
         const snippet = extractContentText(last.content).slice(0, 500).trim();
-        await waglPut(`Session note: ${snippet}`, 0, cfg.dbPath, waglEnv);
-        api.logger?.info?.("[openclaw-wagl] session memory captured");
+        if (!snippet) return;
+        const dedupeKey = createHash("sha256").update(snippet).digest("hex").slice(0, 32);
+
+        // Tag with the model that produced this response (if known)
+        const sessionId = ctx?.sessionId ?? event?.sessionId;
+        const model = sessionId ? sessionModelMap.get(sessionId) : undefined;
+        const tags = model ? [`model:${model}`] : undefined;
+
+        await waglPut(`Session note: ${snippet}`, 0, cfg.dbPath, waglEnv, dedupeKey, "transcript", tags);
+        api.logger?.info?.(`[openclaw-wagl] session memory captured${model ? ` (model=${model})` : ""}`);
       } catch (err) {
         api.logger?.warn?.(`[openclaw-wagl] capture skipped: ${String(err)}`);
       }
