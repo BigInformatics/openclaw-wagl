@@ -35,37 +35,92 @@ async function waglExec(args: string[], timeoutMs = 10_000, extraEnv: Record<str
   }
 }
 
-/** Run wagl recall and return formatted text, or null if nothing meaningful. */
+function truncateText(text: string, maxChars = 320): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return `${trimmed.slice(0, maxChars - 1).trimEnd()}…`;
+}
+
+function extractMemoryText(entry: any): string | null {
+  const item = entry?.item ?? entry;
+  const candidates = [item?.text, item?.content, item?.summary, item?.title];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return null;
+}
+
+function pushUniqueText(target: string[], seen: Set<string>, text: string, maxChars = 320) {
+  const normalized = text.trim().replace(/\s+/g, " ").toLowerCase();
+  if (!normalized || seen.has(normalized)) return;
+  seen.add(normalized);
+  target.push(truncateText(text, maxChars));
+}
+
+/** Run wagl recall and return compact, LLM-friendly text, or null if nothing meaningful. */
 async function waglRecall(query: string, dbPath: string, env: Record<string,string> = {}): Promise<string | null> {
-  const raw = await waglExec(["recall", query, "--db", dbPath], 10_000, env);
-  let data: any;
+  const raw = await waglExec(["recall", query, "--db", dbPath, "--json"], 10_000, env);
+  let parsed: any;
   try {
-    data = JSON.parse(raw);
+    parsed = JSON.parse(raw);
   } catch {
     // If output isn't JSON, return as-is if non-empty
-    return raw.length > 10 ? raw : null;
+    return raw.length > 10 ? truncateText(raw, 1_500) : null;
+  }
+
+  const data = parsed?.ok === true && parsed?.data ? parsed.data : parsed;
+  const canonical = data?.canonical ?? {};
+  const related: any[] = Array.isArray(data?.related) ? data.related : [];
+
+  const seen = new Set<string>();
+  const canonicalLines: string[] = [];
+  const relatedLines: string[] = [];
+
+  // Prefer explicit canonical fields when present.
+  for (const key of ["user_profile", "user_preferences"]) {
+    const text = extractMemoryText(canonical?.[key]);
+    if (text) pushUniqueText(canonicalLines, seen, text);
+  }
+
+  // Canonical list from newer wagl schemas.
+  if (Array.isArray(canonical?.list)) {
+    for (const entry of canonical.list) {
+      const text = extractMemoryText(entry);
+      if (text) pushUniqueText(canonicalLines, seen, text);
+    }
+  }
+
+  // Backward-compatible fallback for other canonical shapes.
+  if (canonicalLines.length === 0 && canonical && typeof canonical === "object") {
+    for (const val of Object.values(canonical)) {
+      if (Array.isArray(val)) {
+        for (const entry of val) {
+          const text = extractMemoryText(entry);
+          if (text) pushUniqueText(canonicalLines, seen, text);
+        }
+      } else {
+        const text = extractMemoryText(val);
+        if (text) pushUniqueText(canonicalLines, seen, text);
+      }
+    }
+  }
+
+  for (const entry of related) {
+    const text = extractMemoryText(entry);
+    if (text) pushUniqueText(relatedLines, seen, text);
   }
 
   const lines: string[] = [];
-
-  // Canonical objects
-  const canonical = data?.canonical ?? {};
-  for (const [key, val] of Object.entries(canonical)) {
-    if (val && typeof val === "object") {
-      lines.push(`**${key}:** ${JSON.stringify(val)}`);
-    } else if (typeof val === "string" && val.trim()) {
-      lines.push(`**${key}:** ${val.trim()}`);
-    }
+  if (canonicalLines.length > 0) {
+    lines.push("**canonical:**");
+    for (const text of canonicalLines.slice(0, 4)) lines.push(`- ${text}`);
   }
 
-  // Related items — may be flat or wrapped in { item: ... }
-  const related: any[] = data?.related ?? [];
-  for (const entry of related) {
-    const item = entry?.item ?? entry;
-    const text = item?.text ?? item?.content ?? item?.summary;
-    if (text && typeof text === "string" && text.trim()) {
-      lines.push(`- ${text.trim()}`);
-    }
+  if (relatedLines.length > 0) {
+    if (lines.length > 0) lines.push("**related:**");
+    for (const text of relatedLines.slice(0, 8)) lines.push(`- ${text}`);
   }
 
   return lines.length > 0 ? lines.join("\n") : null;
