@@ -70,6 +70,15 @@ async function waglRecall(query: string, dbPath: string, env: Record<string,stri
     return raw.length > 10 ? truncateText(raw, 1_500) : null;
   }
 
+  if (parsed?.ok === false) {
+    const errMsg = typeof parsed?.error === "string"
+      ? parsed.error
+      : parsed?.error
+        ? JSON.stringify(parsed.error)
+        : "wagl recall returned ok=false";
+    throw new Error(errMsg);
+  }
+
   const data = parsed?.ok === true && parsed?.data ? parsed.data : parsed;
   const canonical = data?.canonical ?? {};
   const related: any[] = Array.isArray(data?.related) ? data.related : [];
@@ -119,7 +128,7 @@ async function waglRecall(query: string, dbPath: string, env: Record<string,stri
   }
 
   if (relatedLines.length > 0) {
-    if (lines.length > 0) lines.push("**related:**");
+    lines.push("**related:**");
     for (const text of relatedLines.slice(0, 8)) lines.push(`- ${text}`);
   }
 
